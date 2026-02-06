@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.npz
+*.npy
+Plots/*.png
+Plots/*.pdf
+.ipynb_checkpoints/
+
