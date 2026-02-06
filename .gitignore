@@ -5,4 +5,5 @@ __pycache__/
 Plots/*.png
 Plots/*.pdf
 .ipynb_checkpoints/
+CP_Project/
 
