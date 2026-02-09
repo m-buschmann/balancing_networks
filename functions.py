@@ -176,25 +176,52 @@ def get_isi_cv(N, spike_trains, t_min, t_max):
     return cv_valid
 
 
-def get_spike_correlation(spike_trains, t_min, t_max, bin_size, N):
+def kernel(t, tau1=50, tau2=200):
+    return 1/tau1 * np.exp(-np.abs(t)/tau1) - 1/tau2 * np.exp(-np.abs(t)/tau2)
 
-    bins = np.arange(t_min, t_max + bin_size, bin_size)
-    counts = np.zeros((N, len(bins) - 1))
+
+def get_spike_correlations(spike_times, t_min, t_max, dt=1, n_pairs=3800, tau1=50, tau2=200):
+    N = len(spike_times)
+
+    time = np.arange(t_min, t_max, dt)
+    T = len(time)
+
+    t_kernel = np.arange(-10*tau2, 10*tau2, dt)
+    K = kernel(t_kernel, tau1, tau2)
+
+    F = np.zeros((N, T))
 
     for i in range(N):
-        t = spike_trains[i]
-        t = t[(t >= t_min) & (t < t_max)]
-        counts[i], _ = np.histogram(t, bins=bins)
+        signal = np.zeros(T)
 
-    corr_mat = np.full((N, N), 0)
+        spikes_in_window = spike_times[i][(spike_times[i] >= t_min) & (spike_times[i] < t_max)]
+        indices = np.round((spikes_in_window - t_min) / dt).astype(int)
+        indices = indices[(indices >= 0) & (indices < T)]
 
-    for i in range(N):
-        corr_mat[i, i] = 1.0
-        for j in range(i + 1, N):
-            if counts[i].std() > 0 and counts[j].std() > 0:
-                c = np.corrcoef(counts[i], counts[j])[0, 1]
-                corr_mat[i, j] = corr_mat[j, i] = c
-    
-    corr_array = (np.sum(corr_mat, axis=1) - 1.0) / (N - 1)
+        signal[indices] = 1.0
 
-    return corr_array
+        conv = np.convolve(signal, K, mode='same') 
+        start = len(K)//2
+        F[i] = conv[start:start + T]
+
+    rng = np.random.default_rng()
+    i_idx, j_idx = np.triu_indices(N, k=1)
+    sel = rng.choice(len(i_idx), size=n_pairs, replace=False)
+    pairs = np.column_stack((i_idx[sel], j_idx[sel]))
+
+    X = np.zeros(n_pairs)
+
+    for k, (i, j) in enumerate(pairs):
+        Fi = F[i]
+        Fj = F[j]
+
+        Vij = np.sum(Fi * Fj)
+        Vii = np.sum(Fi * Fi)
+        Vjj = np.sum(Fj * Fj)
+
+        if Vii > 0 and Vjj > 0:
+            X[k] = Vij / np.sqrt(Vii * Vjj)
+        else:
+            X[k] = np.nan
+
+    return X
