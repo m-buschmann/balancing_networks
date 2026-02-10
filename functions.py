@@ -6,7 +6,7 @@ from brian2 import *
 
 #### Simulation ####
 
-def run_simulation(simtime, task, p_rc=0.75, simtime_2=100*10**3 * ms):
+def run_simulation(simtime, task, p_rc=0.75, simtime_2=50*10**3 * ms):
 
 
     # Cell
@@ -81,6 +81,7 @@ def run_simulation(simtime, task, p_rc=0.75, simtime_2=100*10**3 * ms):
 
     Syn_EE = Synapses(G_E, G_E, on_pre='g_E_post += g_bar', delay=gamma)
     Syn_EE.connect(p=0.02)
+
     Syn_IE = Synapses(G_E, G_I, on_pre='g_E_post += g_bar', delay=gamma)
     Syn_IE.connect(p=0.02)
 
@@ -89,8 +90,17 @@ def run_simulation(simtime, task, p_rc=0.75, simtime_2=100*10**3 * ms):
 
     Syn_II = Synapses(G_I, G_I, on_pre='''g_I += 10*g_bar''', delay=gamma)
     Syn_II.connect(p=0.02)
+    
+    if task == 'c':
+        Syn_EE_latent = Synapses(G_E, G_E, 'w : 1', on_pre='g_E_post += w*g_bar', delay=gamma)
 
-    all_synapses = [Syn_EE, Syn_IE, Syn_EI, Syn_II]
+        Syn_EE_latent.connect(p=p_rc)
+
+        Syn_EE_latent.w = 0.0
+
+        all_synapses = [Syn_EE, Syn_IE, Syn_EI, Syn_II, Syn_EE_latent]
+    else:
+        all_synapses = [Syn_EE, Syn_IE, Syn_EI, Syn_II]
 
     Poisson_E = PoissonInput(G_E, 'g_E', N=100, rate=5*Hz, weight=g_bar)
     Poisson_I = PoissonInput(G_I, 'g_E', N=100, rate=5*Hz, weight=g_bar)
@@ -113,24 +123,19 @@ def run_simulation(simtime, task, p_rc=0.75, simtime_2=100*10**3 * ms):
     net.run(simtime)
 
     if task == 'c':
-        neuron_idcs = np.random.choice(N_E, 500, replace=False)
 
-        Syn_G_E_sub = Synapses(
-            G_E, G_E,
-            on_pre='g_E_post += g_bar',
-            delay=gamma
+        Syn_EE_latent.w = 1.0
+
+        assembly = np.arange(0, 500)
+
+        mask = (
+            np.isin(Syn_EE_latent.i[:], assembly) &
+            np.isin(Syn_EE_latent.j[:], assembly) &
+            (Syn_EE_latent.i[:] != Syn_EE_latent.j[:]) &
+            (np.random.rand(len(Syn_EE_latent.w)) < p_rc)
         )
 
-        # Create all-to-all connections inside the subset with probability p_rc
-        i, j = np.meshgrid(neuron_idcs, neuron_idcs)
-        mask = np.random.rand(len(i.flatten())) < p_rc
-
-        Syn_G_E_sub.connect(
-            i=i.flatten()[mask],
-            j=j.flatten()[mask]
-        )
-
-        net.add(Syn_G_E_sub)
+        Syn_EE_latent.w[mask] = 2.0
 
         net.run(simtime_2)
     
