@@ -6,7 +6,7 @@ from brian2 import *
 
 #### Simulation ####
 
-def run_simulation(simtime, task, p_rc=0.02, simtime_2=100*10**3 * ms):
+def run_simulation(simtime, task, p_rc=0.05, simtime_2=100*10**3 * ms):
 
 
     # Cell
@@ -91,21 +91,6 @@ def run_simulation(simtime, task, p_rc=0.02, simtime_2=100*10**3 * ms):
 
     Syn_II = Synapses(G_I, G_I, on_pre='''g_I += 10*g_bar''', delay=gamma)
     Syn_II.connect(p=0.02)
-    
-    if task == 'c':
-        Syn_EE_latent = Synapses(G_E, G_E, 'w : 1', on_pre='g_E_post += w*g_bar', delay=gamma)
-
-        Syn_EE_latent.connect(condition='i<500 and j<500 and i!=j')
-
-        Syn_EE_latent.w = 0.0
-
-        assembly = np.arange(0, 500)
-
-        assembly_mon = StateMonitor(G_E, ('I_inh', 'I_exc'), record=range(10))
-
-        all_synapses = [Syn_EE, Syn_IE, Syn_EI, Syn_II, Syn_EE_latent]
-    else:
-        all_synapses = [Syn_EE, Syn_IE, Syn_EI, Syn_II]
 
     Poisson_E = PoissonInput(G_E, 'g_E', N=100, rate=5*Hz, weight=g_bar)
     Poisson_I = PoissonInput(G_I, 'g_E', N=100, rate=5*Hz, weight=g_bar)
@@ -120,7 +105,10 @@ def run_simulation(simtime, task, p_rc=0.02, simtime_2=100*10**3 * ms):
     monitors = [SpikeMonE, SpikeMonI, StateMonSyn_EI, RateMon, CurrentMon]
 
     if task == 'c':
+        assembly = np.arange(0, 500)
+        assembly_mon = StateMonitor(G_E, ('I_inh', 'I_exc'), record=range(10))
         monitors.append(assembly_mon)
+        
 
     #Run
     net = Network()
@@ -132,31 +120,26 @@ def run_simulation(simtime, task, p_rc=0.02, simtime_2=100*10**3 * ms):
     net.run(simtime)
 
     if task == 'c':
-        formation_mask = np.random.rand(len(Syn_EE_latent.w)) < p_rc
+        assembly_start = 0
+        assembly_end = 500
+        assembly_indices = np.arange(assembly_start, assembly_end)
 
-        candidate_indices = np.where(formation_mask)[0]
+        w_assembly = 1.0  
 
-        baseline_pairs = set(zip(Syn_EE.i[:], Syn_EE.j[:]))
+        num_connections_modified = 0
 
-        baseline_lookup = {
-            (int(i), int(j)): idx
-            for idx, (i, j) in enumerate(zip(Syn_EE.i[:], Syn_EE.j[:]))
-        }
-
-        for k in candidate_indices:
-            i = int(Syn_EE_latent.i[k])
-            j = int(Syn_EE_latent.j[k])
-
-            pair = (i, j)
-
-            if pair in baseline_lookup:
-                idx = baseline_lookup[pair]
-                Syn_EE.w[idx] = 2.0
-            else:
-                Syn_EE_latent.w[k] = 1.0
-
-        #print("Number of latent synapses activated:", np.sum(Syn_EE_latent.w>0))
-        #print("Number of EE synapses boosted:", np.sum(Syn_EE.w>1))
+        for i in assembly_indices:
+            for j in assembly_indices:
+                if i != j and np.random.rand() < p_rc:
+                    existing = (Syn_EE.i == i) & (Syn_EE.j == j)
+                    if np.any(existing):
+                        idx = np.where(existing)[0][0]
+                        Syn_EE.w[idx] *= 2.0
+                    else:
+                        Syn_EE.connect(i=i, j=j)
+                        Syn_EE.w[-1] = w_assembly
+        
+        print('new assembly')
 
         net.run(simtime_2)
     
