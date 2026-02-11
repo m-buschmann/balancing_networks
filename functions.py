@@ -6,7 +6,7 @@ from brian2 import *
 
 #### Simulation ####
 
-def run_simulation(simtime, task, p_rc=0.05, simtime_2=100*10**3 * ms):
+def run_simulation(simtime, task, p_rc=0.05, simtime_2=50*10**3 * ms):
 
 
     # Cell
@@ -88,12 +88,13 @@ def run_simulation(simtime, task, p_rc=0.05, simtime_2=100*10**3 * ms):
 
     Syn_EI = Synapses(G_I, G_E, 'w : 1', on_pre=pre_logic, on_post=post_logic)
     Syn_EI.connect(p=0.02)
+    Syn_EI.w = 0.1
 
     Syn_II = Synapses(G_I, G_I, on_pre='''g_I += 10*g_bar''', delay=gamma)
     Syn_II.connect(p=0.02)
 
-    Poisson_E = PoissonInput(G_E, 'g_E', N=100, rate=5*Hz, weight=g_bar)
-    Poisson_I = PoissonInput(G_I, 'g_E', N=100, rate=5*Hz, weight=g_bar)
+    Poisson_E = PoissonInput(G_E, 'g_E', N=50, rate=2*Hz, weight=0.05*g_bar)
+    Poisson_I = PoissonInput(G_I, 'g_E', N=50, rate=2*Hz, weight=0.05*g_bar)
 
     #Monitors
     SpikeMonE = SpikeMonitor(G_E[:800], record=True)
@@ -108,7 +109,8 @@ def run_simulation(simtime, task, p_rc=0.05, simtime_2=100*10**3 * ms):
         assembly = np.arange(0, 500)
         assembly_mon = StateMonitor(G_E, ('I_inh', 'I_exc'), record=range(10))
         monitors.append(assembly_mon)
-        
+
+    all_synapses = [Syn_EE, Syn_EI, Syn_II, Syn_IE]
 
     #Run
     net = Network()
