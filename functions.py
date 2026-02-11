@@ -6,7 +6,7 @@ from brian2 import *
 
 #### Simulation ####
 
-def run_simulation(simtime, task, p_rc=0.75, simtime_2=50*10**3 * ms):
+def run_simulation(simtime, task, p_rc=0.02, simtime_2=100*10**3 * ms):
 
 
     # Cell
@@ -79,8 +79,9 @@ def run_simulation(simtime, task, p_rc=0.75, simtime_2=50*10**3 * ms):
         pre_logic = 'g_I_post += w * 10 * g_bar; w += eta * (x_post - alpha)'
         post_logic = 'w += eta * x_pre'
 
-    Syn_EE = Synapses(G_E, G_E, on_pre='g_E_post += g_bar', delay=gamma)
+    Syn_EE = Synapses(G_E, G_E, 'w : 1', on_pre='g_E_post += w*g_bar', delay=gamma)
     Syn_EE.connect(p=0.02)
+    Syn_EE.w = 1
 
     Syn_IE = Synapses(G_E, G_I, on_pre='g_E_post += g_bar', delay=gamma)
     Syn_IE.connect(p=0.02)
@@ -94,9 +95,13 @@ def run_simulation(simtime, task, p_rc=0.75, simtime_2=50*10**3 * ms):
     if task == 'c':
         Syn_EE_latent = Synapses(G_E, G_E, 'w : 1', on_pre='g_E_post += w*g_bar', delay=gamma)
 
-        Syn_EE_latent.connect(p=p_rc)
+        Syn_EE_latent.connect(condition='i<500 and j<500 and i!=j')
 
         Syn_EE_latent.w = 0.0
+
+        assembly = np.arange(0, 500)
+
+        assembly_mon = StateMonitor(G_E, ('I_inh', 'I_exc'), record=range(10))
 
         all_synapses = [Syn_EE, Syn_IE, Syn_EI, Syn_II, Syn_EE_latent]
     else:
@@ -108,10 +113,14 @@ def run_simulation(simtime, task, p_rc=0.75, simtime_2=50*10**3 * ms):
     #Monitors
     SpikeMonE = SpikeMonitor(G_E[:800], record=True)
     SpikeMonI = SpikeMonitor(G_I[:200], record=True)
-    CurrentMon = StateMonitor(G_E, ('I_inh', 'I_exc'), record=range(10))
+    CurrentMon = StateMonitor(G_E, ('I_inh', 'I_exc'), record=np.arange(1000, 1010, 1))
     StateMonSyn_EI = StateMonitor(Syn_EI, ('w'), record=Syn_EI[:10])
     RateMon = PopulationRateMonitor(G_E)
+    
     monitors = [SpikeMonE, SpikeMonI, StateMonSyn_EI, RateMon, CurrentMon]
+
+    if task == 'c':
+        monitors.append(assembly_mon)
 
     #Run
     net = Network()
@@ -123,19 +132,31 @@ def run_simulation(simtime, task, p_rc=0.75, simtime_2=50*10**3 * ms):
     net.run(simtime)
 
     if task == 'c':
+        formation_mask = np.random.rand(len(Syn_EE_latent.w)) < p_rc
 
-        Syn_EE_latent.w = 1.0
+        candidate_indices = np.where(formation_mask)[0]
 
-        assembly = np.arange(0, 500)
+        baseline_pairs = set(zip(Syn_EE.i[:], Syn_EE.j[:]))
 
-        mask = (
-            np.isin(Syn_EE_latent.i[:], assembly) &
-            np.isin(Syn_EE_latent.j[:], assembly) &
-            (Syn_EE_latent.i[:] != Syn_EE_latent.j[:]) &
-            (np.random.rand(len(Syn_EE_latent.w)) < p_rc)
-        )
+        baseline_lookup = {
+            (int(i), int(j)): idx
+            for idx, (i, j) in enumerate(zip(Syn_EE.i[:], Syn_EE.j[:]))
+        }
 
-        Syn_EE_latent.w[mask] = 2.0
+        for k in candidate_indices:
+            i = int(Syn_EE_latent.i[k])
+            j = int(Syn_EE_latent.j[k])
+
+            pair = (i, j)
+
+            if pair in baseline_lookup:
+                idx = baseline_lookup[pair]
+                Syn_EE.w[idx] = 2.0
+            else:
+                Syn_EE_latent.w[k] = 1.0
+
+        #print("Number of latent synapses activated:", np.sum(Syn_EE_latent.w>0))
+        #print("Number of EE synapses boosted:", np.sum(Syn_EE.w>1))
 
         net.run(simtime_2)
     
@@ -150,16 +171,20 @@ def run_simulation(simtime, task, p_rc=0.75, simtime_2=50*10**3 * ms):
         for i, times in SpikeMonI.spike_trains().items()
     }
 
-
-    return {
-            'SpikeMonE'     : SpikeMonE,
-            'SpikeMonI'     : SpikeMonI,
-            'CurrentMon'    : CurrentMon,
-            'RateMonE'      : RateMon,
-            'SynMon'        : StateMonSyn_EI,
-            'spike_trains_E': SpikeMonE.spike_trains(),
-            'spike_trains_I': SpikeMonI.spike_trains(),
+    result = {
+            'SpikeMonE'         : SpikeMonE,
+            'SpikeMonI'         : SpikeMonI,
+            'CurrentMon'        : CurrentMon,
+            'RateMonE'          : RateMon,
+            'SynMon'            : StateMonSyn_EI,
+            'spike_trains_E'    : SpikeMonE.spike_trains(),
+            'spike_trains_I'    : SpikeMonI.spike_trains()
             }
+
+    if task == 'c':
+        result['assembly_mon'] = assembly_mon
+    
+    return result
 
 
 ##### Network Analysis #####
